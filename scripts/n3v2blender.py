@@ -187,6 +187,39 @@ def camTodatabase(txtfile, database_path):
     # Close database.db.
     db.close()
 
+# Modify(Anon): prevent images to be unordered
+def databaseToImg(txtfile, database_path, fname2pose):
+        
+    if os.path.exists(database_path)==False:
+        print("ERROR: database path dosen't exist -- please check database.db.")
+        return
+
+    with open(txtfile, 'w') as f:
+        # Open the database.
+        db = COLMAPDatabase.connect(database_path)
+
+        # Commit the data to the file.
+        db.commit()
+        # Read and check cameras.
+        rows = db.execute("SELECT * FROM images")
+        for i in fname2pose.keys():
+            idx, fname, _, _, _, _, _, _, _, _ = next(rows)
+            print(idx)
+            print(fname)
+            pose = fname2pose[fname]
+            R = np.linalg.inv(pose[:3, :3])
+            T = -np.matmul(R, pose[:3, 3])
+            q0 = 0.5 * math.sqrt(1 + R[0, 0] + R[1, 1] + R[2, 2])
+            q1 = (R[2, 1] - R[1, 2]) / (4 * q0)
+            q2 = (R[0, 2] - R[2, 0]) / (4 * q0)
+            q3 = (R[1, 0] - R[0, 1]) / (4 * q0)
+
+            f.write(f'{idx} {q0} {q1} {q2} {q3} {T[0]} {T[1]} {T[2]} 1 {fname}\n\n')
+
+        # Close database.db.
+        db.close()
+
+
 def do_system(arg):
     print(f"==== running: {arg}")
     err = os.system(arg)
@@ -231,9 +264,10 @@ if __name__ == '__main__':
     images_path = os.path.join(args.path, "images/")
     os.makedirs(images_path, exist_ok=True)
     
-    for video in videos:
-        cam_name = video.split('/')[-1].split('.')[-2]
-        do_system(f"ffmpeg -i {video} -start_number 0 {images_path}/{cam_name}_%04d.png")
+    # TODO(Anon): skip if done once
+    # for video in videos:
+    #     cam_name = video.split('/')[-1].split('.')[-2]
+    #     do_system(f"ffmpeg -i {video} -start_number 0 {images_path}/{cam_name}_%04d.png")
         
     # load data
     images = [f[len(args.path):] for f in sorted(glob.glob(os.path.join(args.path, "images/", "*"))) if f.lower().endswith('png') or f.lower().endswith('jpg') or f.lower().endswith('jpeg')]
@@ -348,61 +382,56 @@ if __name__ == '__main__':
                 fname2pose.update({fname: pose})
                 
     os.makedirs(os.path.join(colmap_workspace, 'images'), exist_ok=True)
+
+    # TODO(Anon): skip if done once
     for fname in fname2pose.keys():
         os.symlink(os.path.abspath(os.path.join(images_path, fname)), os.path.join(colmap_workspace, 'images', fname))
-                
-    with open(os.path.join(colmap_workspace, 'created/sparse/images.txt'), 'w') as f:
-        idx = 1
-        for fname in fname2pose.keys():
-            pose = fname2pose[fname]
-            R = np.linalg.inv(pose[:3, :3])
-            T = -np.matmul(R, pose[:3, 3])
-            q0 = 0.5 * math.sqrt(1 + R[0, 0] + R[1, 1] + R[2, 2])
-            q1 = (R[2, 1] - R[1, 2]) / (4 * q0)
-            q2 = (R[0, 2] - R[2, 0]) / (4 * q0)
-            q3 = (R[1, 0] - R[0, 1]) / (4 * q0)
-
-            f.write(f'{idx} {q0} {q1} {q2} {q3} {T[0]} {T[1]} {T[2]} 1 {fname}\n\n')
-            idx += 1
     
     with open(os.path.join(colmap_workspace, 'created/sparse/points3D.txt'), 'w') as f:
         f.write('')
     
-    db_path = os.path.join(colmap_workspace, 'database.db')
+    # Modify(Anon): can not save db on nas cause of sqlite bug
+    # db_path = os.path.join(colmap_workspace, 'database.db')
+    db_path = os.path.join('/home/gongyiqing/outputs/4dr', 'database.db')
     
-    do_system(f"colmap feature_extractor \
+    # Modify(Anon): alias to real path
+    colmap = '/home/gongyiqing/tools/colmap/build/src/exe/colmap'
+
+    do_system(f"{colmap} feature_extractor \
                 --database_path {db_path} \
                 --image_path {os.path.join(colmap_workspace, 'images')}")
     
     camTodatabase(os.path.join(colmap_workspace, 'created/sparse/cameras.txt'), db_path)
+    # Modify(Anon): prevent image from being unordered
+    databaseToImg(os.path.join(colmap_workspace, 'created/sparse/images.txt'), db_path, fname2pose)
     
-    do_system(f"colmap exhaustive_matcher  \
+    do_system(f"{colmap} exhaustive_matcher  \
                 --database_path {db_path}")
     
     os.makedirs(os.path.join(colmap_workspace, 'triangulated', 'sparse'), exist_ok=True)
     
-    do_system(f"colmap point_triangulator   \
+    do_system(f"{colmap} point_triangulator   \
                 --database_path {db_path} \
                 --image_path {os.path.join(colmap_workspace, 'images')} \
                 --input_path  {os.path.join(colmap_workspace, 'created/sparse')} \
                 --output_path  {os.path.join(colmap_workspace, 'triangulated/sparse')}")
     
-    do_system(f"colmap model_converter \
+    do_system(f"{colmap} model_converter \
                 --input_path  {os.path.join(colmap_workspace, 'triangulated/sparse')} \
                 --output_path  {os.path.join(colmap_workspace, 'created/sparse')} \
                 --output_type TXT")
     
     os.makedirs(os.path.join(colmap_workspace, 'dense'), exist_ok=True)
     
-    do_system(f"colmap image_undistorter  \
+    do_system(f"{colmap} image_undistorter  \
                 --image_path  {os.path.join(colmap_workspace, 'images')} \
                 --input_path  {os.path.join(colmap_workspace, 'created/sparse')} \
                 --output_path  {os.path.join(colmap_workspace, 'dense')}")
     
-    do_system(f"colmap patch_match_stereo   \
+    do_system(f"{colmap} patch_match_stereo   \
                 --workspace_path   {os.path.join(colmap_workspace, 'dense')}")
     
-    do_system(f"colmap stereo_fusion    \
+    do_system(f"{colmap} stereo_fusion    \
                 --workspace_path {os.path.join(colmap_workspace, 'dense')} \
                 --output_path {os.path.join(args.path, 'points3d.ply')}")
     
