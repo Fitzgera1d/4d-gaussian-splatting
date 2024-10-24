@@ -34,6 +34,10 @@ try:
 except ImportError:
     TENSORBOARD_FOUND = False
 
+# Modify(Anon): fix bug - Too many open files
+import torch.multiprocessing
+torch.multiprocessing.set_sharing_strategy('file_system')
+
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint, debug_from,
              gaussian_dim, time_duration, num_pts, num_pts_ratio, rot_4d, force_sh_3d, batch_size):
     
@@ -81,6 +85,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     iteration = first_iter
     while iteration < opt.iterations + 1:
         for batch_data in training_dataloader:
+            # import copy
+            # _batch_data = copy.deepcopy(batch_data)
+            # del batch_data
+            # batch_data = _batch_data
             iteration += 1
             if iteration > opt.iterations:
                 break
@@ -101,6 +109,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             batch_radii = []
             
             for batch_idx in range(batch_size):
+
                 gt_image, viewpoint_cam = batch_data[batch_idx]
                 gt_image = gt_image.cuda()
                 viewpoint_cam = viewpoint_cam.cuda()
