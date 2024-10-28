@@ -37,9 +37,12 @@ except ImportError:
 # Modify(Anon): fix bug - Too many open files
 import torch.multiprocessing
 torch.multiprocessing.set_sharing_strategy('file_system')
+# Modify(Anon): fix bug - image file is truncated
+from PIL import ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint, debug_from,
-             gaussian_dim, time_duration, num_pts, num_pts_ratio, rot_4d, force_sh_3d, batch_size):
+             gaussian_dim, time_duration, num_pts, num_pts_ratio, rot_4d, force_sh_3d, batch_size, fps):
     
     if dataset.frame_ratio > 1:
         time_duration = [time_duration[0] / dataset.frame_ratio,  time_duration[1] / dataset.frame_ratio]
@@ -47,7 +50,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree, gaussian_dim=gaussian_dim, time_duration=time_duration, rot_4d=rot_4d, force_sh_3d=force_sh_3d, sh_degree_t=2 if pipe.eval_shfs_4d else 0)
-    scene = Scene(dataset, gaussians, num_pts=num_pts, num_pts_ratio=num_pts_ratio, time_duration=time_duration)
+    scene = Scene(dataset, gaussians, num_pts=num_pts, num_pts_ratio=num_pts_ratio, time_duration=time_duration, fps=fps)
     gaussians.training_setup(opt)
     
     if checkpoint:
@@ -85,10 +88,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     iteration = first_iter
     while iteration < opt.iterations + 1:
         for batch_data in training_dataloader:
-            # import copy
-            # _batch_data = copy.deepcopy(batch_data)
-            # del batch_data
-            # batch_data = _batch_data
             iteration += 1
             if iteration > opt.iterations:
                 break
@@ -372,6 +371,8 @@ if __name__ == "__main__":
     parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--start_checkpoint", type=str, default = None)
+    # Add(Anon): add time duration
+    parser.add_argument("--fps", type=float, default=30.0)
     
     parser.add_argument("--gaussian_dim", type=int, default=3)
     parser.add_argument("--time_duration", nargs=2, type=float, default=[-0.5, 0.5])
@@ -409,7 +410,7 @@ if __name__ == "__main__":
 
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
     training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.start_checkpoint, args.debug_from,
-             args.gaussian_dim, args.time_duration, args.num_pts, args.num_pts_ratio, args.rot_4d, args.force_sh_3d, args.batch_size)
+             args.gaussian_dim, args.time_duration, args.num_pts, args.num_pts_ratio, args.rot_4d, args.force_sh_3d, args.batch_size, args.fps)
 
     # All done
     print("\nTraining complete.")
